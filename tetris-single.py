@@ -12,8 +12,9 @@ import logging
 
 import wx
 
-logging.basicConfig(level=logging.DEBUG,
-                    format="%(asctime)-15s|%(levelname)s|%(filename)s:%(lineno)d:%(name)s|%(message)s")
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)-15s|%(levelname)s|%(filename)s:%(lineno)d:%(name)s|%(message)s")
 
 #
 # Helper classes that are independent of the GUI library
@@ -32,8 +33,8 @@ class Tetrominoes(IntEnum):
     ZShape = 7
 
 class Shape:
-    """7 tetrominoes shapes + dummy. We make x axis the bottom edge each shape, hence min y for shape
-    coordinates should be 0
+    """7 tetrominoes shapes + dummy. We make x axis the bottom edge each shape, hence min y for
+    shape coordinates should be 0
     """
     shapeCoords = (
         (( 0, 0), (0, 0), (0, 0), (0, 0)),  # 0 = NoShape
@@ -46,7 +47,7 @@ class Shape:
         ((-1, 1), (0, 1), (0, 0), (1, 0)),  # 7 = Z
     )
 
-    def __init__(self, shape: int = Tetrominoes.NoShape):
+    def __init__(self, shape: Tetrominoes = Tetrominoes.NoShape):
         """Construct a new shape. The variable self.coords is pre-created and later on modified
         in-place. It should not be a reference to Shape.shapeCoords as it will be modified when
         the shape is moved.
@@ -55,19 +56,19 @@ class Shape:
         self._shape = shape
 
     @property
-    def shape(self) -> int:
+    def shape(self) -> Tetrominoes:
         """return shape of this piece"""
         return self._shape
 
     @shape.setter
-    def shape(self, shape: int) -> None:
+    def shape(self, shape: Tetrominoes) -> None:
         """Reset this piece to another shape, with self.coords updated
         """
         self.coords[:] = [list(x) for x in self.shapeCoords[shape]]
         self._shape = shape
 
     @staticmethod
-    def randomize() -> None:
+    def randomize() -> Shape:
         """Give a random piece"""
         shape = Tetrominoes(random.randint(1, len(Shape.shapeCoords)-1))
         return Shape(shape)
@@ -116,15 +117,15 @@ class TetrisBoard:
         self.nTilesH = width  # i.e., row size in num of square tiles
         self.nTilesV = height # i.e., col size in num of square tiles
         # row major array to hold tiles, from the tile we can look up the shape
-        self.tiles = []
+        self.tiles : List[Tetrominoes] = []
         self.clear()
 
-    def __setitem__(self, key: Tuple[int, int], value: Shape) -> None:
+    def __setitem__(self, key: Tuple[int, int], value: Tetrominoes) -> None:
         """Setter to allow board[x,y] = shape syntax"""
         col, row = key # board[x,y] -> key will be a tuple
         self.tiles[row*self.nTilesH + col] = value
 
-    def __getitem__(self, key: Tuple[int, int]) -> Shape:
+    def __getitem__(self, key: Tuple[int, int]) -> Tetrominoes:
         """Setter to allow board[x,y] syntax"""
         col, row = key # board[x,y] -> key will be a tuple
         return self.tiles[row*self.nTilesH + col]
@@ -161,11 +162,11 @@ class TetrisBoard:
             self[cx, cy] = piece.shape
 
     def removefull(self) -> int:
-        """Remove any full lines in the board. Move lines down and refill the top lines with
-        NoShape. This board will be updated after this function call if any full lines are removed
+        """Remove any full rows in the board. Move rows down and refill the top rows with
+        NoShape. This board will be updated after this function call if any full rows are removed
 
         Returns:
-            The number of lines removed
+            The number of rows removed
         """
         # Check each rows for what is not full
         notfull = [y for y in range(self.nTilesV)
@@ -179,7 +180,7 @@ class TetrisBoard:
             logging.debug("Moving row %d to row %d", k, j)
             for i in range(self.nTilesH):
                 self[i, j] = self[i, k]
-        # Fill in any new lines at top with NoShape
+        # Fill in any new rows at top with NoShape
         toprow = max(i for i, _ in move) + 1
         for j in range(toprow, self.nTilesV):
             logging.debug("filling empty row: %d", j)
@@ -311,11 +312,11 @@ class Tetris(wx.Frame):
         self.statusbar = self.CreateStatusBar()
         self.statusbar.SetStatusText("0")
         # create game board which this frame as parent
-        self.board = Board(self)
+        self.board = GameBoard(self)
         self.board.SetFocus()
         self.board.start()
 
-class Board(wx.Panel):
+class GameBoard(wx.Panel):
     """Tetris game board, all tetris logic are here. The board is operated in terms of tiles, which
     each tetris piece is four tiles.
     """
@@ -324,6 +325,7 @@ class Board(wx.Panel):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.SetBackgroundColour((255, 255, 255))
         n_hori, n_vert = 10, 18
         self.timer = wx.Timer(self, self.ID_TIMER)
         self.board = TetrisGame(n_hori, n_vert)
@@ -363,7 +365,8 @@ class Board(wx.Panel):
         self.Refresh()
 
     def move_down(self) -> bool:
-        """Move one row down, if we cannot, trigger the on_dropped() function to check for completed rows
+        """Move one row down, if we cannot, trigger the on_dropped() function to check for completed
+        rows
 
         Returns:
             Whether we have successfully moved the piece to one row down
@@ -375,8 +378,8 @@ class Board(wx.Panel):
         return moved
 
     def drop_down(self) -> None:
-        """Move the piece down one row at a time until we are at the bottom row or we cannot move further
-        down, then trigger the on_dropped() function to check for completed rows
+        """Move the piece down one row at a time until we are at the bottom row or we cannot move
+        further down, then trigger the on_dropped() function to check for completed rows
         """
         while self.move_down():
             pass
@@ -392,7 +395,7 @@ class Board(wx.Panel):
         else:
             logging.debug("Cannot move %s to (%s,%s)", piece.shape, self.board.cur_x+x_delta, self.board.cur_y)
 
-    def draw_tile(self, canvas: wx.PaintDC, x: int, y: int, shape: Shape) -> None:
+    def draw_tile(self, canvas: wx.PaintDC, x: int, y: int, shape: Tetrominoes) -> None:
         """On canvas dc, at pixel coordinate (x,y), draw shape. Color depends on shape.
         """
         colors = ["#000000", "#CC6666", "#66CC66", "#6666CC",
@@ -420,8 +423,8 @@ class Board(wx.Panel):
         canvas.DrawRectangle(x+1, y+1, W-2, H-2)
 
     def OnPaint(self, event: wx.Event):
-        """Paint event handler. Triggered when window's contents need to be repainted.
-        Canvas coordinate is x going positive toward right and y going positive downwards
+        """Paint event handler. Triggered when window's contents need to be repainted. Canvas
+        coordinate is x going positive toward right and y going positive downwards
         """
         canvas = wx.PaintDC(self) # must create a PaintDC object in OnPaint()
         size = self.GetClientSize()
