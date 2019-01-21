@@ -313,7 +313,7 @@ class Tetris(wx.Frame):
         self.statusbar = self.CreateStatusBar()
         self.statusbar.SetStatusText("0")
         # create game board which this frame as parent
-        self.board = Board(self)
+        self.board = GameBoard(self)
         self.board.SetFocus()
         self.board.start()
 ```
@@ -321,11 +321,11 @@ class Tetris(wx.Frame):
 This frame, derived from `wx.Frame`, will create a window with a status bar at
 bottom and a *panel* at middle. We predefined the window size to be 180x380
 pixels. We do not need to assign anything to this frame besides creating a
-panel `Board()` under it (by setting parent of the panel as `self`) as all the
+panel `GameBoard()` under it (by setting parent of the panel as `self`) as all the
 sophisticated logic are defined in the panel, as below:
 
 ```python
-class Board(wx.Panel):
+class GameBoard(wx.Panel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         n_hori, n_vert = 10, 18
@@ -510,7 +510,7 @@ Below are the other functions invoked from the event handlers. They should be
 self-explanatory.
 
 ```python
-class Board(wx.Panel):
+class GameBoard(wx.Panel):
     speed = 300
     ID_TIMER = 1
 
@@ -552,3 +552,474 @@ class Board(wx.Panel):
 ```
 
 ## Enhancement to the user interface: Extra hint to the user
+
+Usually a Tetris game will show to the player the current score and other
+information. For example, the next tetromino piece. Indeed, the game engine as
+we coded above already prepared for this by maintaining a few state variables.
+To display them, we have a few options.  First we explore the *splitter window* in
+wxPython, which shows the game and the dashboard side by side. The way to use a
+splitter window is as follows:
+
+```python
+class Tetris(wx.Frame):
+    def __init__(self, parent, id=-1, title="Tetris"):
+        super().__init__(parent, id, title=title, size=(180*2, 380),
+                         style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER ^ wx.MAXIMIZE_BOX)
+        self.splitter = wx.SplitterWindow(self)
+
+        self.dashboard = Dashboard(self.splitter, style=wx.SUNKEN_BORDER)
+        self.gameboard = GameBoard(self.splitter, style=wx.SUNKEN_BORDER)
+        self.dashboard.gameboard = self.gameboard
+        self.gameboard.dashboard = self.dashboard
+
+        self.splitter.SplitVertically(self.gameboard, self.dashboard, 180)
+        self.splitter.SetMinimumPaneSize(180)
+
+        self.gameboard.SetFocus()
+        self.gameboard.start()
+```
+
+Splitter window is a widget in wxPython. We create the game panel and dashboard
+panel as children of the splitter window, then set up the splitter to be
+vertical (i.e., the two panels are side by side horizontally).
+
+We use the same game engine as it is still the same Tetris game with same
+logic. The dashboard is created to expose some state variables in the engine.
+The constructor of the dashboard panel has all the widgets prepared:
+
+```python
+class Dashboard(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.SetBackgroundColour((255, 255, 255))
+        # make widget to display text
+        text = wx.StaticText(self, -1, "SCORE", pos=(20, 15))
+        text.SetFont(wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+        text = wx.StaticText(self, -1, "LEVEL", pos=(20, 85))
+        text.SetFont(wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+        text = wx.StaticText(self, -1, "ROWS", pos=(20, 155))
+        text.SetFont(wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+
+        self.scoretxt = wx.StaticText(self, -1, "0", pos=(40, 30), size=(100, 30), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.scoretxt.SetFont(wx.Font(25, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+        self.leveltxt = wx.StaticText(self, -1, "1", pos=(40, 100), size=(100, 30), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.leveltxt.SetFont(wx.Font(25, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+        self.rowstxt = wx.StaticText(self, -1, "0", pos=(40, 170), size=(100, 30), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.rowstxt.SetFont(wx.Font(25, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+
+        self.message = wx.StaticText(self, -1, "", pos=(0, 250), size=(170, 50), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.message.SetForegroundColour((255, 0, 0))
+        self.message.SetFont(wx.Font(28, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+        # bind events on panel
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
+```
+
+And we hook up the panel's paint event handler to refresh. We first pull the
+data such as game score from the game engine, and draw the "next tetromino
+piece". So the dashboard is kind of unmanaged that it automatically display all
+data.
+
+```python
+class Dashboard(wx.Panel):
+    def update(self) -> None:
+        """Update what this dashboard should show"""
+        self.scoretxt.SetLabel(str(self.gameboard.board.score))
+        self.leveltxt.SetLabel(str(self.gameboard.board.level))
+        self.rowstxt.SetLabel(str(self.gameboard.board.rows_completed))
+
+    def OnPaint(self, event: wx.Event):
+        """Paint event handler. Triggered when window's contents need to be repainted, e.g. on
+        Refresh() called.  Canvas coordinate is x going positive toward right and y going positive
+        downwards
+        """
+        self.update()
+        canvas = wx.PaintDC(self) # must create a PaintDC object in OnPaint()
+        size = self.GetClientSize()
+        tile_width, tile_height = self.gameboard.tile_width, self.gameboard.tile_height
+        shape = self.gameboard.board.next_piece
+        center_y = 270
+        # draw square
+        canvas.DrawRectangle(size.GetWidth()//2 - 2.5*tile_width, center_y - 2.5*tile_height,
+                             5*tile_width, 5*tile_height)
+        # position the piece at center
+        min_x, min_y = min(shape.x), min(shape.y)
+        shape_width = (max(shape.x) + 1 - min_x) * tile_width
+        shape_height = (max(shape.y) + 1 - min_y) * tile_height
+        offset_x = (size.GetWidth() - shape_width) // 2 - min_x * tile_width
+        offset_y = center_y + (shape_height // 2) + (min_y-1) * tile_height
+        xs = [offset_x+x * tile_width for x in shape.x]
+        ys = [offset_y-y * tile_height for y in shape.y]
+        for x, y in zip(xs, ys):
+            logging.debug("dashboard draw (%s,%s) shape %s", x, y, shape.shape)
+            self.gameboard.draw_tile(canvas, x, y, shape.shape)
+```
+
+The game panel side is roughly the same as before, except that we do not use a
+status bar any more but use a message label at dashboard instead. For example,
+when we pause the game, the pause function will update the label:
+
+```python
+class GameBoard(wx.Panel):
+    def pause(self) -> None:
+        """Toggle pause state: update status bar message and set/stop timers"""
+        if self.board.pause():
+            self.timer.Stop()
+            self.dashboard.message.SetLabel("Paused")
+            self.dashboard.SetBackgroundColour((225, 225, 225))
+        else:
+            self.timer.Start(self.speed)
+            self.dashboard.message.SetLabel("")
+            self.dashboard.SetBackgroundColour((255, 255, 255))
+        self.Refresh()
+        self.dashboard.Refresh()
+```
+
+## Enhancement to the user interface: Combined panel
+
+If the dashboard panel is so simple that all the magic is in the paint event
+handler, we can actually combine it with the game panel. We can simply create a
+bigger panel, split it into two halves, and use one half to serve as dashboard
+while the other half for the game. So we just need one panel for the Tetris
+frame:
+
+```python
+class Tetris(wx.Frame):
+    def __init__(self, parent, id=-1, title="Tetris"):
+        super().__init__(parent, id, title=title, size=(180*2, 380),
+                         style=wx.DEFAULT_FRAME_STYLE ^ wx.RESIZE_BORDER ^ wx.MAXIMIZE_BOX)
+        # create game board which this frame as parent
+        self.gameboard = GameBoard(self)
+        self.gameboard.SetFocus()
+        self.gameboard.start()
+```
+
+and the game panel is now merge of the original game panel and dashboard panel:
+
+```python
+class GameBoard(wx.Panel):
+    speed = 300
+    ID_TIMER = 1
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.SetBackgroundColour((255, 255, 255))
+        n_hori, n_vert = 10, 18
+        self.timer = wx.Timer(self, self.ID_TIMER)
+        self.board = TetrisGame(n_hori, n_vert)
+        # dashboard components
+        textfont = wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False)
+        wx.StaticText(self, -1, "SCORE", pos=(200, 15)).SetFont(textfont)
+        wx.StaticText(self, -1, "LEVEL", pos=(200, 85)).SetFont(textfont)
+        wx.StaticText(self, -1, "ROWS", pos=(200, 155)).SetFont(textfont)
+        dashfont = wx.Font(25, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False)
+        self.scoretxt = wx.StaticText(self, -1, "0", pos=(220, 30), size=(100, 30), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.leveltxt = wx.StaticText(self, -1, "1", pos=(220, 100), size=(100, 30), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.rowstxt = wx.StaticText(self, -1, "0", pos=(220, 170), size=(100, 30), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        for txt in [self.scoretxt, self.leveltxt, self.rowstxt]:
+            txt.SetFont(dashfont)
+        self.message = wx.StaticText(self, -1, "", pos=(185, 250), size=(170, 50), style=wx.ALIGN_CENTRE_HORIZONTAL)
+        self.message.SetForegroundColour((255, 0, 0))
+        self.message.SetFont(wx.Font(28, wx.DEFAULT, wx.NORMAL, wx.NORMAL, False))
+        # bind events on panel
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
+        self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
+        self.Bind(wx.EVT_TIMER, self.OnTimer, id=self.ID_TIMER)
+```
+
+and the paint event handler is now doing both of the original panels:
+
+```python
+class GameBoard(wx.Panel):
+    def OnPaint(self, event: wx.Event):
+        # update text component
+        self.scoretxt.SetLabel(str(self.board.score))
+        self.leveltxt.SetLabel(str(self.board.level))
+        self.rowstxt.SetLabel(str(self.board.rows_completed))
+        # prepare canvas
+        canvas = wx.PaintDC(self) # must create a PaintDC object in OnPaint()
+        size = self.GetClientSize()
+        topmargin = size.GetHeight() - self.board.nTilesV * self.tile_height
+        # draw gameboard border
+        x = self.board.nTilesH * self.tile_width + 1
+        canvas.DrawLine(x, 0, x, (self.board.nTilesV+1) * self.tile_height)
+        # draw whatever on the tetris board
+        for j in range(self.board.nTilesV): # for each square vertically down
+            for i in range(self.board.nTilesH): # for each square horizontally right
+                # find coordinate on canvas for upper left corner of this tile. wx.DC has (0,0) at top left corner
+                x = i * self.tile_width
+                y = (self.board.nTilesV - j - 1) * self.tile_height + topmargin
+                if self.board[i, j] != Tetrominoes.NoShape:
+                    self.draw_tile(canvas, x, y, self.board[i, j])
+        # draw the dropping piece: 4 tiles
+        if self.board.this_piece.shape != Tetrominoes.NoShape:
+            xs = [(self.board.cur_x + x) * self.tile_width for x in self.board.this_piece.x]
+            ys = [(self.board.nTilesV - (self.board.cur_y + y) - 1) * self.tile_height for y in self.board.this_piece.y]
+            for x, y in zip(xs, ys):
+                self.draw_tile(canvas, x, topmargin+y, self.board.this_piece.shape)
+        # draw the square to hold the next piece
+        center_x, center_y = size.GetWidth()*3//4, 270
+        rec_x = center_x - 2.5*self.tile_width
+        rec_y = center_y - 2.5*self.tile_height
+        canvas.SetPen(wx.Pen("#000000"))
+        canvas.SetBrush(wx.Brush("#FFFFFF", style=wx.TRANSPARENT))
+        canvas.DrawRectangle(rec_x, rec_y, 5*self.tile_width, 5*self.tile_height)
+        logging.debug("dashboard rectangle (%s,%s)x(%s,%s)", rec_x, rec_y, 5*self.tile_width, 5*self.tile_height)
+        # position the piece at center
+        min_x, min_y = min(self.board.next_piece.x), min(self.board.next_piece.y)
+        shape_width = (max(self.board.next_piece.x) + 1 - min_x) * self.tile_width
+        shape_height = (max(self.board.next_piece.y) + 1 - min_y) * self.tile_height
+        offset_x = center_x - shape_width // 2 - min_x * self.tile_width
+        offset_y = center_y + shape_height // 2 + (min_y-1) * self.tile_height
+        xs = [offset_x+x * self.tile_width for x in self.board.next_piece.x]
+        ys = [offset_y-y * self.tile_height for y in self.board.next_piece.y]
+        for x, y in zip(xs, ys):
+            logging.debug("dashboard draw (%s,%s) shape %s", x, y, self.board.next_piece.shape)
+            self.draw_tile(canvas, x, y, self.board.next_piece.shape)
+```
+
+## Demonstration of portability of the game engine
+
+While we used wxPython above, the game engine is indeed agnostic to the GUI
+library to be used. For example, we can use the same engine but implement the
+game on Tk widgets.
+
+Python's Tk library, tkinter, is very similar to wxPython. The way we launch
+the framework is like the following:
+
+```python
+import tkinter
+
+def main():
+    root = tkinter.Tk()
+    game = Tetris(root)
+    game.start()
+    root.mainloop()
+```
+
+And the game similar to the case of using wx: we create a big panel with
+dashboard widgets on the right half and the game itself on the left half. We
+bind the keyboard event to a handler. The panel update, i.e. drawing the
+tetromino pieces and update text labels, are handled on the refresh function.
+
+```python
+class Tetris(tkinter.Frame):
+    """The tetris game implemented in tkinter. Dummy class with logic reside in the board class
+    """
+    speed = 300
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.parent.title("Tetris")
+        self.parent.resizable(width=tkinter.FALSE, height=tkinter.FALSE)
+        self.parent.geometry("360x400")
+        self.init_widgets()
+        n_hori, n_vert = 10, 18
+        self.timer = None
+        self.board = TetrisGame(n_hori, n_vert)
+        # bind events on panel
+        self.parent.bind("<Key>", self.OnKeyDown)
+        self.Refresh()
+
+    def init_widgets(self):
+        self.pack(fill=tkinter.BOTH, expand=tkinter.TRUE)
+
+        self.gamecanvas = tkinter.Canvas(self, width=180, height=360, bg="#F0F0F0", relief=tkinter.SUNKEN)
+        self.gamecanvas.grid(row=0, column=0, rowspan=8, padx=3, pady=3, sticky=tkinter.N+tkinter.E+tkinter.S+tkinter.W)
+        textfont = "Inconsolata 16 bold"
+        dashfont = "Inconsolata 25"
+        tkinter.Label(self, text="SCORE", font=textfont) \
+               .grid(row=0, column=1, sticky=tkinter.W, padx=10, pady=(25, 0))
+        self.scorelabel = tkinter.Label(self, text="0", compound=tkinter.CENTER, font=dashfont)
+        self.scorelabel.grid(row=1, column=1, padx=10)
+        tkinter.Label(self, text="LEVEL", font=textfont) \
+               .grid(row=2, column=1, sticky=tkinter.W, padx=10, pady=(15, 0))
+        self.levellabel = tkinter.Label(self, text="1", compound=tkinter.CENTER, font=dashfont)
+        self.levellabel.grid(row=3, column=1, padx=10)
+        tkinter.Label(self, text="ROWS", font=textfont) \
+               .grid(row=4, column=1, sticky=tkinter.W, padx=10, pady=(15, 0))
+        self.rowslabel = tkinter.Label(self, text="2", compound=tkinter.CENTER, font=dashfont)
+        self.rowslabel.grid(row=5, column=1, padx=10)
+        self.message = tkinter.Label(self, text="GAME OVER", compound=tkinter.CENTER, font="Inconsolata 25", fg="red")
+        self.message.grid(row=6, column=1, padx=0, pady=5)
+        self.hintcanvas = tkinter.Canvas(self, width=90, height=90)
+        self.hintcanvas.grid(row=7, column=1, pady=(0, 25))
+
+    @property
+    def tile_width(self) -> int:
+        return self.gamecanvas.winfo_width() // self.board.nTilesH
+
+    @property
+    def tile_height(self) -> int:
+        return self.gamecanvas.winfo_height() // self.board.nTilesV
+
+    def start(self) -> None:
+        if self.board.start():
+            self.message.config(text="")
+            if self.timer:
+                self.parent.after_cancel(self.timer) # in case after already set up
+            self.timer = self.parent.after(self.speed, self.OnTimer) # timer fire regularly in pulses
+            logging.debug("game started: %s", self.board.started)
+
+    def pause(self) -> None:
+        if self.board.pause():
+            if self.timer:
+                self.parent.after_cancel(self.timer)
+                self.timer = None
+            self.message.config(text="Paused")
+            self.config(bg="#E1E1E1")
+        else:
+            if self.timer:
+                self.parent.after_cancel(self.timer) # in case after already set up
+            self.timer = self.parent.after(self.speed, self.OnTimer)
+            self.message.config(text="")
+            self.config(bg="#FFFFFF")
+        self.Refresh()
+
+    def move_down(self) -> bool:
+        moved = self.board.one_row_down()
+        self.Refresh()
+        return moved
+
+    def drop_down(self) -> None:
+        while self.move_down():
+            pass
+        logging.debug("drop piece to curr_y = %d", self.board.cur_y)
+
+    def try_move(self, piece, x_delta) -> None:
+        if self.board.try_pos(piece, self.board.cur_x + x_delta, self.board.cur_y):
+            logging.debug("Moved %s to (%s,%s)", piece.shape, self.board.cur_x, self.board.cur_y)
+            self.Refresh()
+        else:
+            logging.debug("Cannot move %s to (%s,%s)", piece.shape, self.board.cur_x+x_delta, self.board.cur_y)
+
+    def draw_tile(self, canvas, x: int, y: int, shape: Tetrominoes) -> None:
+        colors = ["#000000", "#CC6666", "#66CC66", "#6666CC",
+                  "#CCCC66", "#CC66CC", "#66CCCC", "#DAAA00"]
+        light = ["#000000", "#F89FAB", "#79FC79", "#7979FC",
+                 "#FCFC79", "#FC79FC", "#79FCFC", "#FCC600"]
+        dark = ["#000000", "#803C3B", "#3B803B", "#3B3B80",
+                "#80803B", "#803B80", "#3B8080", "#806200"]
+        W, H = self.tile_width, self.tile_height
+        # draw left and bottom edge, with light color
+        canvas.create_line(x, y+H-1, x, y, fill=light[shape])
+        canvas.create_line(x, y, x+W-1, y, fill=light[shape])
+        # draw top and right edge, with dark color
+        canvas.create_line(x+1, y+H-1, x+W-1, y+H-1, fill=dark[shape])
+        canvas.create_line(x+W-1, y+H-1, x+W-1, y+1, fill=dark[shape])
+        # fill square
+        canvas.create_rectangle(x+1, y+1, x+W-1, y+H-1, fill=colors[shape])
+
+    def Refresh(self):
+        # update text component
+        self.scorelabel.config(text=str(self.board.score))
+        self.levellabel.config(text=str(self.board.level))
+        self.rowslabel.config(text=str(self.board.rows_completed))
+        # prepare canvas
+        height, width = self.gamecanvas.winfo_height(), self.gamecanvas.winfo_width()
+        topmargin = (height - self.board.nTilesV * self.tile_height) // 2
+        leftmargin = (width - self.board.nTilesH * self.tile_width) // 2
+        logging.debug("canvas width=%d, height=%d", width, height)
+        logging.debug("topmargin=%d, leftmargin=%d, tile width=%d, height=%d", topmargin,
+                leftmargin, self.tile_width, self.tile_height)
+        # draw gameboard border
+        self.gamecanvas.delete("all") # quick and dirty way to start from a clean canvas
+        self.gamecanvas.create_rectangle(leftmargin-1, topmargin-1,
+                leftmargin+1+self.board.nTilesH*self.tile_width,
+                topmargin+1+self.board.nTilesV*self.tile_height)
+        logging.debug("draw rectangle (%d,%d)--(%d,%d)", leftmargin-1, topmargin-1,
+                leftmargin+1+self.board.nTilesH*self.tile_width,
+                topmargin+1+self.board.nTilesV*self.tile_height)
+        # draw whatever on the tetris board
+        for j in range(self.board.nTilesV): # for each square vertically down
+            for i in range(self.board.nTilesH): # for each square horizontally right
+                # find coordinate on canvas for upper left corner of this tile. wx.DC has (0,0) at top left corner
+                x = i * self.tile_width + leftmargin
+                y = (self.board.nTilesV - j - 1) * self.tile_height + topmargin
+                if self.board[i, j] != Tetrominoes.NoShape:
+                    self.draw_tile(self.gamecanvas, x, y, self.board[i, j])
+                    logging.debug("gameboard draw (%s,%s) shape %s", x, y, self.board[i, j])
+        # draw the dropping piece: 4 tiles
+        if self.board.this_piece.shape != Tetrominoes.NoShape:
+            xs = [(self.board.cur_x + x) * self.tile_width for x in self.board.this_piece.x]
+            ys = [(self.board.nTilesV - (self.board.cur_y + y) - 1) * self.tile_height for y in self.board.this_piece.y]
+            for x, y in zip(xs, ys):
+                self.draw_tile(self.gamecanvas, leftmargin+x, topmargin+y, self.board.this_piece.shape)
+                logging.debug("gameboard draw (%s,%s) shape %s", leftmargin+x, topmargin+y, self.board.this_piece.shape)
+        # draw the square to hold the next piece
+        center_x, center_y = 45, 45
+        self.hintcanvas.delete("all")
+        self.hintcanvas.create_rectangle(1, 1, 88, 88, fill="#F0F0F0")
+        # position the piece at center
+        min_x, min_y = min(self.board.next_piece.x), min(self.board.next_piece.y)
+        shape_width = (max(self.board.next_piece.x) + 1 - min_x) * self.tile_width
+        shape_height = (max(self.board.next_piece.y) + 1 - min_y) * self.tile_height
+        offset_x = center_x - shape_width // 2 - min_x * self.tile_width
+        offset_y = center_y + shape_height // 2 + (min_y-1) * self.tile_height
+        xs = [offset_x+x * self.tile_width for x in self.board.next_piece.x]
+        ys = [offset_y-y * self.tile_height for y in self.board.next_piece.y]
+        for x, y in zip(xs, ys):
+            logging.debug("dashboard draw (%s,%s) shape %s", x, y, self.board.next_piece.shape)
+            self.draw_tile(self.hintcanvas, x, y, self.board.next_piece.shape)
+
+    def OnTimer(self):
+        if self.board.neednewpiece:
+            # first timer after full row is removed, generate new piece instead of moving down
+            if self.board.make_new_piece():
+                logging.debug("This: %s; next: %s", self.board.this_piece.shape, self.board.next_piece.shape)
+            else:
+                # cannot even place the shape at top middle of the board, finish the game
+                self.timer = None
+                self.message.config(text="Game over")
+                self.config(bg="#E1E1E1")
+                logging.debug("game over")
+                return # do not restart timer
+        else:
+            # normal: move the current piece down for one row
+            logging.debug("moving piece down, curr_y = %d", self.board.cur_y)
+            self.move_down()
+        # re-fire
+        if self.timer:
+            self.parent.after_cancel(self.timer) # in case after already set up
+        self.timer = self.parent.after(self.speed, self.OnTimer)
+
+    def OnKeyDown(self, event):
+        if not self.board.started or self.board.this_piece.shape == Tetrominoes.NoShape:
+            logging.debug("not started - ignore input")
+            return
+        logging.debug("OnKeyDown: key=%r", event.keysym)
+        if event.char in ["P", "p"]:
+            self.pause()
+            return
+        if self.board.paused:
+            return
+        if event.keysym == "Left":
+            self.try_move(self.board.this_piece, -1)
+        elif event.keysym == "Right":
+            self.try_move(self.board.this_piece, +1)
+        elif event.keysym == "Down":
+            self.try_move(self.board.this_piece.rotate_ccw(), 0)
+        elif event.keysym == "Up":
+            self.try_move(self.board.this_piece.rotate_cw(), 0)
+        elif event.char == " ":
+            self.drop_down()
+        elif event.char in ["D", "d"]:
+            self.move_down()
+```
+
+Obviously, we see some differences between the way wx and Tk should be used.
+For example, wx provide key code on a key event but Tk gives key symbol names
+as a string, in case of non-alphanumeric keys are pressed. As expected, all
+widgets have a different interface to update (e.g.
+`self.message.config(text="")` in Tk vs `self.message.SetLabel("")` in wx). But
+the most crucial difference between them is the way timer is handled. In
+wxPython, a timer is continuously firing at regular interval until it is
+stopped. But tkinter's timer is fired once only and you have to set it again
+after each fire. Therefore we see in the above code we frequently cancel a
+timer and set it again:
+
+```python
+if self.timer:
+    self.parent.after_cancel(self.timer)
+self.timer = self.parent.after(self.speed, self.OnTimer)
+```
